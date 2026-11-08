@@ -1,0 +1,51 @@
+# Binaries and build artifacts
+/bin/
+/dist/
+/out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/server
+
+# Dependency directories (remove if using 'go mod vendor')
+/vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Test coverage
+*.cover
+*.out
+coverage.html
+coverage.txt
+*.test
+*.prof
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.pdf

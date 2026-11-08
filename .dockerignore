@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+**/*_test.go
+**/testdata
+.idea
+.vscode
+node_modules
+dist
+Dockerfile
+docker-compose.yml
+nginx/
+migrations/
+README.md

@@ -3,10 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        APP_VERSION: ${APP_VERSION:?APP_VERSION is required}
-        APP_COMMIT:  ${APP_COMMIT:-unknown}
-    image: core-api:${APP_VERSION:?APP_VERSION is required}
+    image: core-api:${APP_VERSION:?APP_VERSION is required}-${APP_COMMIT:?APP_COMMIT is required}
     env_file:
       - .env
     environment:

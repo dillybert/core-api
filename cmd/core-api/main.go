@@ -35,7 +35,7 @@ func main() {
 		logger.Error("core-api terminated with error", zap.Error(err))
 	}
 
-	if syncErr := logger.Sync(); syncErr != nil {
+	if syncErr := logger.Sync(); syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) {
 		fmt.Fprintf(os.Stderr, "logger sync failed: %v\n", syncErr)
 	}
 
@@ -74,9 +74,18 @@ __________________________________________________
 		return errors.New("DATABASE_URL is required")
 	}
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
-		return fmt.Errorf("failed to create database pool: %w", err)
+		return fmt.Errorf("parse database config: %w", err)
+	}
+	cfg.MaxConns = 20
+	cfg.MinConns = 5
+	cfg.MaxConnLifetime = time.Hour
+	cfg.MaxConnIdleTime = 30 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("create database pool: %w", err)
 	}
 	defer pool.Close()
 
@@ -150,7 +159,9 @@ __________________________________________________
 			}
 
 			// Wait until Serve goroutine exits.
-			<-serverErr
+			if serveErr := <-serverErr; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				logger.Error("http server stopped unexpectedly during shutdown", zap.Error(serveErr))
+			}
 
 			return fmt.Errorf("http server shutdown failed: %w", err)
 		}

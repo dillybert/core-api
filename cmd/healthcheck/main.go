@@ -19,7 +19,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "health check failed:", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}() // fucking errcheck :)
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Fprintf(os.Stderr, "health check failed: status %d\n", resp.StatusCode)

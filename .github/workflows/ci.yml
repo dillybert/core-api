@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches-ignore: [main]   # main проверится в release-ветке, но можно и здесь
+    branches: [main]   # также проверяем main, чтобы видеть статус до тега
   pull_request:
 
 concurrency:
@@ -21,8 +21,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
+          go-version-file: go.mod   # версия Go берётся из go.mod
+          cache: true              # кэш модулей и build cache
 
       - name: go vet
         run: go vet ./...
@@ -31,9 +31,9 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9   # актуальная мажорная версия
         with:
-          version: v2.5.0
+          version: v2.15.0        # последняя стабильная версия линтера
           args: --timeout=5m
 
       - name: Build check

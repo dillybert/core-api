@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,79 +19,155 @@ import (
 
 var (
 	version = "unknown"
-	commit  = "0"
+	commit  = "unknown"
 )
 
 func main() {
 	logger, err := zap.NewProduction()
 	if err != nil {
-		fmt.Errorf("logger initializing error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "logger initialization failed: %v\n", err)
+		os.Exit(1)
 	}
-	defer logger.Sync()
 
-	if err := run(logger); err != nil {
-		logger.Error("failed to start api server",
-			zap.Error(err),
-		)
+	err = run(logger)
+	if err != nil {
+		logger.Error("core-api terminated with error", zap.Error(err))
+	}
+
+	if syncErr := logger.Sync(); syncErr != nil {
+		fmt.Fprintf(os.Stderr, "logger sync failed: %v\n", syncErr)
+	}
+
+	if err != nil {
 		os.Exit(1)
 	}
 }
 
 func run(logger *zap.Logger) error {
-	logger.Info("info",
-		zap.String("version", version),
-		zap.String("commit", commit),
-	)
+	fmt.Printf(`
+ ██████╗ █████╗ ██████╗ ██╗   ██╗███████╗ ██████╗
+██╔════╝██╔══██╗██╔══██╗██║   ██║██╔════╝██╔═══██╗
+██║     ███████║██████╔╝██║   ██║█████╗  ██║   ██║
+██║     ██╔══██║██╔══██╗╚██╗ ██╔╝██╔══╝  ██║   ██║
+╚██████╗██║  ██║██║  ██║ ╚████╔╝ ███████╗╚██████╔╝
+ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝ ╚═════╝
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+  Carveo Core API
+  Version: %s
+  Commit:  %s
+
+`, version, commit)
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+
+	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		return fmt.Errorf("failed to open database %s: %w", os.Getenv("DATABASE_URL"), err)
+		return fmt.Errorf("failed to create database pool: %w", err)
 	}
 	defer pool.Close()
 
-	handler, err := api.NewHandler(logger, pool)
-	if err != nil {
-		return fmt.Errorf("failed to create api handler", zap.Error(err))
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := pool.Ping(pingCtx); err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	api, err := ogen.NewServer(handler)
+	handler, err := api.NewHandler(logger, pool)
 	if err != nil {
-		return fmt.Errorf("failed to create api", zap.Error(err))
+		return fmt.Errorf("failed to create api handler: %w", err)
+	}
+
+	apiServer, err := ogen.NewServer(handler)
+	if err != nil {
+		return fmt.Errorf("failed to create ogen server: %w", err)
+	}
+
+	addr := os.Getenv("HTTP_ADDR")
+	if addr == "" {
+		addr = ":8080"
 	}
 
 	server := &http.Server{
-		Addr:              os.Getenv("HTTP_ADDR"),
-		Handler:           api,
+		Addr:              addr,
+		Handler:           apiServer,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
+
 	serverErr := make(chan error, 1)
+
 	go func() {
-		logger.Info("core-api server started", zap.String("addr", os.Getenv("HTTP_ADDR")))
-		serverErr <- server.ListenAndServe()
+		logger.Info("http server started",
+			zap.String("addr", listener.Addr().String()),
+		)
+
+		serverErr <- server.Serve(listener)
 	}()
 
 	select {
 	case <-ctx.Done():
-		shutDownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Restore default signal handling.
+		// A second SIGTERM/SIGINT can terminate the process immediately.
+		stop()
+
+		logger.Info("shutting down http server")
+
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(),
+			20*time.Second,
+		)
 		defer cancel()
 
-		if err := server.Shutdown(shutDownCtx); err != nil {
-			return fmt.Errorf("failed to shutdown http server", zap.Error(err))
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("graceful shutdown failed",
+				zap.Error(err),
+			)
+
+			// Force-close remaining connections.
+			if closeErr := server.Close(); closeErr != nil {
+				logger.Error("failed to force close http server",
+					zap.Error(closeErr),
+				)
+			}
+
+			// Wait until Serve goroutine exits.
+			<-serverErr
+
+			return fmt.Errorf("http server shutdown failed: %w", err)
 		}
 
+		// Wait until Serve goroutine exits.
+		err := <-serverErr
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("http server stopped unexpectedly: %w", err)
+		}
+
+		logger.Info("http server stopped")
 		return nil
+
 	case err := <-serverErr:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 
-		return fmt.Errorf("serve error: %w", err)
+		return fmt.Errorf("http server failed: %w", err)
 	}
 }

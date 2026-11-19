@@ -3,6 +3,8 @@ SHELL := /bin/bash
 
 # ---------- Project ----------
 
+GO_VERSION := 1.27.2
+GOLANGCI_LINT_VERSION := v2.14.0
 APP_NAME := core-api
 IMAGE_NAME := docker.io/dillybert/core-api
 
@@ -21,10 +23,11 @@ IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
 
 DOCKERFILE := Dockerfile
 DOCKER_CONTEXT := .
-
-# ---------- Go ----------
-
-GO := go
+DOCKER_BUILD_ARGS := \
+	--build-arg GO_VERSION=$(GO_VERSION) \
+	--build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) \
+	--build-arg APP_VERSION=$(GIT_VERSION) \
+	--build-arg APP_COMMIT=$(GIT_COMMIT)
 
 # ---------- Registry ----------
 
@@ -33,7 +36,6 @@ REGISTRY := docker.io
 # ---------- Phony ----------
 
 .PHONY: help inspect
-.PHONY: test test-race vet fmt lint check
 .PHONY: build image run
 .PHONY: tag release push-release
 .PHONY: publish clean
@@ -46,45 +48,15 @@ inspect: ## Show build metadata
 	@echo "Commit:       $(APP_COMMIT)"
 	@echo "Image:        $(IMAGE)"
 
-# ---------- Development ----------
-
-test: ## Run Go tests
-	$(GO) test ./...
-
-test-race: ## Run tests with race detector
-	$(GO) test -race ./...
-
-vet: ## Run go vet
-	$(GO) vet ./...
-
-fmt: ## Format Go source files
-	$(GO) fmt ./...
-
-lint: ## Run Go linters (requires golangci-lint)
-	golangci-lint run ./...
-
-check: fmt vet test ## Run standard quality checks
 
 # ---------- Build ----------
 
-build: ## Build Go binary locally
-	CGO_ENABLED=0 $(GO) build \
-		-trimpath \
-		-tags timetzdata \
-		-ldflags="-s -w -X main.version=$(APP_VERSION) -X main.commit=$(APP_COMMIT)" \
-		-o bin/core-api \
-		./cmd/core-api
-
 image: ## Build Docker image
 	docker build \
-		--build-arg APP_VERSION="$(APP_VERSION)" \
-		--build-arg APP_COMMIT="$(APP_COMMIT)" \
+		$(DOCKER_BUILD_ARGS) \
 		-t "$(IMAGE)" \
 		-f "$(DOCKERFILE)" \
 		"$(DOCKER_CONTEXT)"
-
-run: build ## Run locally
-	./bin/core-api
 
 # ---------- Versioning ----------
 
@@ -115,11 +87,6 @@ login: ## Login to Docker Hub
 
 publish: image ## Build and publish Docker image
 	docker push "$(IMAGE)"
-
-# ---------- Cleanup ----------
-
-clean: ## Remove local build artifacts
-	rm -rf bin/
 
 # ---------- Help ----------
 

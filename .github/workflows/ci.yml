@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]   # main проверится в release-ветке, но можно и здесь
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race)
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.5.0
+          args: --timeout=5m
+
+      - name: Build check
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/core-api

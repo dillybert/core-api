@@ -13,6 +13,7 @@ import (
 
 	"github.com/dillybert/core-api/generated/ogen"
 	"github.com/dillybert/core-api/internal/api"
+	"github.com/dillybert/core-api/internal/env"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -52,9 +53,12 @@ func run(logger *zap.Logger) error {
 ╚██████╗██║  ██║██║  ██║ ╚████╔╝ ███████╗╚██████╔╝
  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝ ╚═════╝
 
-  Carveo Core API
+__________________________________________________
+
+  CORE API  ·  TAXI DISPATCH PLATFORM
   Version: %s
   Commit:  %s
+__________________________________________________
 
 `, version, commit)
 
@@ -65,7 +69,7 @@ func run(logger *zap.Logger) error {
 	)
 	defer stop()
 
-	dbURL := os.Getenv("DATABASE_URL")
+	dbURL := env.Get("DATABASE_URL", "")
 	if dbURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
@@ -93,10 +97,7 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("failed to create ogen server: %w", err)
 	}
 
-	addr := os.Getenv("HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
+	addr := env.Get("HTTP_ADDR", ":8080")
 
 	server := &http.Server{
 		Addr:              addr,
